@@ -1,0 +1,5 @@
+WebSocket implementation in php
+
+This code is based on Sebastian Vollands code on https://github.com/sebcode/php-websocketserver
+
+Support for RFC 6455

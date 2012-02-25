@@ -1,0 +1,4 @@
+WebSocket example
+
+to test this run websocket.php in the terminal:
+	php -q websocket.php
