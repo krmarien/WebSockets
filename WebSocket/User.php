@@ -1,35 +1,49 @@
 <?php
-
+ 
 namespace WebSocket;
 
 use Exception;
 
+/**
+ * This is the user who is connected to the websocket.
+ */
 class User
 {
 	private $socket;
 	
 	private $handshaked = false;
 	
-	private $bufferType;
 	private $buffer;
-	
-	const MAX_BUFFER_SIZE = 1048576;
-
+		
+	/**
+	 * @param mixed $socket
+	 */
 	public function __construct($socket)
 	{
 		$this->socket = $socket;
 	}
 	
+	/**
+	 * @return mixed
+	 */
 	public function getSocket()
 	{
 		return $this->socket;
 	}
 	
+	/**
+	 * @return boolean
+	 */
 	public function hasHandshaked()
 	{
 		return $this->handshaked;
 	}
 	
+	/**
+	 * Do the handshake
+	 *
+	 * @param string $data
+	 */
 	public function doHandshake($data)
 	{
 		if ($this->hasHandshaked())
@@ -58,38 +72,51 @@ class User
 			$this->handshaked = true;	
 	}
 	
+	/**
+	 * Write data to the user
+	 *
+	 * @param mixed $data
+	 */
 	public function write($data)
 	{
 		return socket_write($this->socket, $data, strlen($data));
 	}
 	
-	public function createBuffer($frame)
+	/**
+	 * Create the buffer for fragmented frames
+	 *
+	 * @param \WebSocket\Frame $frame
+	 */
+	public function createBuffer(Frame $frame)
 	{
-		$this->bufferType = $frame['opcode'];
-		$this->buffer = $frame['data'];
+		$this->buffer = $frame;
 	}
 	
+	/**
+	 * Append data to the buffer for fragmented frames
+	 *
+	 * @param \WebSocket\Frame $frame
+	 */
 	public function appendBuffer($frame)
 	{
-		$this->buffer .= $frame['data'];
-		
-		if (strlen($this->buffer) > self::MAX_BUFFER_SIZE)
-			$this->clearBuffer();
+		$this->buffer->appendData($frame->getData());
 	}
 	
+	/**
+	 * Clear the buffer of this user
+	 */
 	public function clearBuffer()
 	{
-		$this->buffer = '';
-		$this->bufferType = false;
+		$this->buffer = null;
 	}
 	
+	/**
+	 * Return the complete message of the user
+	 * 
+	 * @return mixed
+	 */
 	public function getBuffer()
 	{
 		return $this->buffer;
-	}
-	
-	public function getBufferType()
-	{
-		return $this->bufferType;
 	}
 }

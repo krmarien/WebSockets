@@ -4,6 +4,9 @@ namespace WebSocket;
 
 use Exception;
 
+/**
+ * This is the server to handle all requests by the websocket protocol.
+ */
 class Server
 {
 
@@ -12,8 +15,6 @@ class Server
 	
 	private $users;
 	private $sockets;
-
-	const MAX_PAYLOAD_LEN = 1048576;
 	
 	const OP_CONT = 0x0;
 	const OP_TEXT = 0x1;
@@ -21,7 +22,11 @@ class Server
 	const OP_CLOSE = 0x8;
 	const OP_PING = 0x9;
 	const OP_PONG = 0xa;
-
+	
+	/**
+	 * @param string $address The url for the websocket master socket
+	 * @param integer $port The port to listen on
+	 */
 	public function __construct($address, $port)
 	{
 		$this->address = $address;
@@ -32,6 +37,9 @@ class Server
 		$this->createSocket();
 	}
 	
+	/**
+	 * Create the master socket
+	 */
 	private function createSocket()
 	{
 		$this->master = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
@@ -51,7 +59,9 @@ class Server
 			throw new Exception('Could not listen to socket: ' . socket_last_error());		
 	}
 	
-	
+	/**
+	 * Start listening on master socket and user sockets
+	 */
 	public function process()
 	{
 		while(true){
@@ -71,6 +81,8 @@ class Server
 							$this->_processFrame($user, $buffer);
 						} else {
 							$user->doHandShake($buffer);
+							if ($user->hasHandshaked())
+								$this->onConnect($user);
 						}
 					}
 				}
@@ -78,6 +90,11 @@ class Server
 		}
 	}
 	
+	/**
+	 * Add a user socket to listen to
+	 *
+	 * @param mixed $socket
+	 */
 	private function _addUserSocket($socket)
 	{
 		if (!$socket)
@@ -86,6 +103,12 @@ class Server
 		$this->sockets[] = $socket;
 	}
 	
+	/**
+	 * Get a user by his socket
+	 *
+	 * @param mixed $socket
+	 * @return \WebSocket\User
+	 */
 	public function getUserBySocket($socket)
 	{
 		foreach($this->users as $user) {
@@ -94,6 +117,11 @@ class Server
 		}
 	}
 	
+	/**
+	 * Remove a user socket
+	 *
+	 * @param mixed $socket
+	 */
 	private function _removeUserSocket($socket)
 	{
 		foreach($this->users as $key => $value) {
@@ -107,118 +135,54 @@ class Server
 		}
 	}
 	
-	private function _processFrame(User $user, $frame)
+	/**
+	 * Process a frame send by a user to the master socket
+	 *
+	 * @param \WebSocket\User $user
+	 * @param mixed $data
+	 */
+	private function _processFrame(User $user, $data)
 	{
-		$f = $this->_decodeFrame($frame);
+		$f = new Frame($data);
 		
 		/* unfragmented message */
-		if ($f['isFin'] && $f['opcode'] != 0) {
+		if ($f->getIsFin() && $f->getOpcode() != 0) {
 			/* unfragmented messages may represent a control frame */
-			if ($f['isControl']) {
-				$this->_handleControlFrame($user, $f['opcode'], $f['data']);
+			if ($f->getIsControl()) {
+				$this->_handleControlFrame($user, $f);
 			} else {
-				$this->gotData($user, $f['opcode'], $f['data']);
+				$this->handleDataFrame($user, $f);
 			}
 		}
 		/* start fragmented message */
-		else if (!$f['isFin'] && $f['opcode'] != 0) {
+		else if (!$f->getIsFin() && $f->getOpcode() != 0) {
 			$user->createBuffer($f);
 		}
 		/* continue fragmented message */
-		else if (!$f['isFin'] && $f['opcode'] == 0) {
+		else if (!$f->getIsFin() && $f->getOpcode() == 0) {
 			$user->appendBuffer($f);
 		}
 		/* finalize fragmented message */
-		else if ($f['isFin'] && $f['opcode'] == 0) {
+		else if ($f->getIsFin() && $f->getOpcode() == 0) {
 			$user->appendBuffer($f);
 			
-			$this->gotData($user, $user->getBufferType(), $user->getBuffer());
+			$this->handleDataFrame($user, $user->getBuffer());
 			
 			$user->clearBuffer();
 		}
 	}
 	
-	private function _decodeFrame($frame)
+	/**
+	 * Handle the received control frames
+	 *
+	 * @param \WebSocket\User $user
+	 * @param \WebSocket\Frame $frame
+	 */
+	private function _handleControlFrame(User $user, Frame $frame)
 	{
-		/* read first 2 bytes */
-		$data = substr($frame, 0, 2);
-		$frame = substr($frame, 2);
-		$b1 = ord($data[0]);
-		$b2 = ord($data[1]);
+		$len = strlen($frame->getData());
 		
-		/* Bit 0 of Byte 1: Indicates that this is the final fragment in a
-		 * message.  The first fragment MAY also be the final fragment.*/
-		$isFin = ($b1 & (1 << 7)) != 0;
-		/* Bits 4-7 of Byte 1: Defines the interpretation of the payload data. */
-		$opcode = $b1 & 0x0f;
-		/* Control frames are identified by opcodes where the most significant
-		 * bit of the opcode is 1 */
-		$isControl = ($b1 & (1 << 3)) != 0;
-		/* Bit 0 of Byte 2: If set to 1, a masking key is present in
-		 * masking-key, and this is used to unmask the payload data. */
-		$isMasked = ($b2 & (1 << 7)) != 0;
-		/* Bits 1-7 of Byte 2: The length of the payload data. */
-		$paylen = $b2 & 0x7f;
-		
-		/* read extended payload length, if applicable */
-		
-		if ($paylen == 126) {
-			/* the following 2 bytes are the actual payload len */
-			$data = substr($frame, 0, 2);
-			$frame = substr($frame, 2);
-			$unpacked = unpack('n', $data);
-			$paylen = $unpacked[1];
-		} else if ($paylen == 127) {
-			/* the following 8 bytes are the actual payload len */
-			$data = substr($frame, 0, 8);
-			$frame = substr($frame, 8);
-			return;
-		}
-		
-		if ($paylen >= self::MAX_PAYLOAD_LEN)
-			return;
-		
-		/* read masking key and decode payload data */
-		
-		$mask = false;
-		$data = '';
-		
-		if ($isMasked) {
-			$mask = substr($frame, 0, 4);
-			$frame = substr($frame, 4);
-		
-			if ($paylen) {
-				$data = substr($frame, 0, $paylen);
-				$frame = substr($frame, $paylen);
-			
-				for ($i = 0, $j = 0, $l = strlen($data); $i < $l; $i++) {
-					$data[$i] = chr(ord($data[$i]) ^ ord($mask[$j]));
-				
-					if ($j++ >= 3) {
-						$j = 0;
-					}
-				}
-			}
-		} else if ($paylen) {
-			$data = substr($frame, 0, $paylen);
-			$frame = substr($frame, $paylen);
-		}
-		
-		$decoded['isFin'] = $isFin;
-		$decoded['opcode'] = $opcode;
-		$decoded['isControl'] = $isControl;
-		$decoded['isMasked'] = $isMasked;
-		$decoded['paylen'] = $paylen;
-		$decoded['data'] = $data;
-		
-		return $decoded;
-	}
-	
-	private function _handleControlFrame(User $user, $type, $data)
-	{
-		$len = strlen($data);
-		
-		if ($type == self::OP_CLOSE) {
+		if ($frame->getOpcode() == self::OP_CLOSE) {
 			/* If there is a body, the first two bytes of the body MUST be a
 			 * 2-byte unsigned integer */
 			if ($len !== 0 && $len === 1) {
@@ -229,9 +193,9 @@ class Server
 			$reason = false;
 			
 			if ($len >= 2) {
-				$unpacked = unpack('n', substr($data, 0, 2));
+				$unpacked = unpack('n', substr($frame->getData(), 0, 2));
 				$statusCode = $unpacked[1];
-				$reason = substr($data, 3);
+				$reason = substr($frame->getData(), 3);
 			}
 						
 			/* Send close frame.
@@ -243,16 +207,27 @@ class Server
 		}
 	}
 	
-	protected function gotData(User $user, $type, $data)
+	/**
+	 * Handle a received data frame
+	 *
+	 * @param \WebSocket\User $user
+	 * @param \WebSocket\Frame $frame
+	 */
+	protected function handleDataFrame(User $user, Frame $frame)
 	{
-		if ($type == self::OP_TEXT) {
-			$this->gotText($user, $data);
-		} else if ($type == self::OP_BIN) {
-			$this->gotBin($user, $data);
+		if ($frame->getOpcode() == self::OP_TEXT) {
+			$this->gotText($user, $frame->getData());
+		} else if ($frame->getOpcode() == self::OP_BIN) {
+			$this->gotBin($user, $frame->getData());
 		}
 	}
 	
-	
+	/**
+	 * Send text to a user socket
+	 *
+	 * @param \WebSocket\User $user
+	 * @param string $text 
+	 */
 	public function sendText($user, $text)
 	{
 		$len = strlen($text);
@@ -275,16 +250,72 @@ class Server
 		$user->write($header . $text);
 	}
 	
+	/**
+	 * Send text to all user socket
+	 *
+	 * @param string $text 
+	 */
+	public function sendTextToAll($text)
+	{
+		$len = strlen($text);
+		
+		/* extended 64bit payload not implemented yet */
+		if ($len > 0xffff) {
+			return;
+		}
+		
+		/* 0x81 = first and last bit set (fin, opcode=text) */
+		$header = chr(0x81);
+		
+		/* extended 32bit payload */
+		if ($len >= 125) {
+			$header .= chr(126) . pack('n', $len);
+		} else {
+			$header .= chr($len);
+		}
+		
+		foreach($this->users as $user)
+			$user->write($header . $text);
+	}
+	
+	/**
+	 * Parse received text
+	 *
+	 * @param \WebSocket\User $user
+	 * @param string $data
+	 */
 	protected function gotText(User $user, $data)
 	{
 		$this->sendText($user, 'Your message to the server was: \'' . $data . '\'');
 	}
 	
+	/**
+	 * Parse received binary
+	 *
+	 * @param \WebSocket\User $user
+	 * @param mixed $data
+	 */
 	protected function gotBin(User $user, $data)
 	{
 	}
 	
+	/**
+	 * Do action when user closed his socket
+	 *
+	 * @param \WebSocket\User $user
+	 * @param integer $statusCode
+	 * @param string $reason
+	 */
 	protected function onClose(User $user, $statusCode, $reason)
+	{
+	}
+	
+	/**
+	 * Do action when a new user has connected to this socket
+	 *
+	 * @param \WebSocket\User $user
+	 */
+	protected function onConnect(User $user)
 	{
 	}
 }

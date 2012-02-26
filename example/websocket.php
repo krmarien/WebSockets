@@ -2,6 +2,7 @@
 
 require_once '../WebSocket/Server.php';
 require_once '../WebSocket/User.php';
+require_once '../WebSocket/Frame.php';
 
 use WebSocket\Server;
 
