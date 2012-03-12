@@ -10,11 +10,11 @@ use Exception;
 class Server
 {
 
-	private $address;
-	private $port;
+	private $_address;
+	private $_port;
 	
-	private $users;
-	private $sockets;
+	private $_users;
+	private $_sockets;
 	
 	const OP_CONT = 0x0;
 	const OP_TEXT = 0x1;
@@ -29,10 +29,10 @@ class Server
 	 */
 	public function __construct($address, $port)
 	{
-		$this->address = $address;
-		$this->port = $port;
-		$this->users = array();
-		$this->sockets = array();
+		$this->_address = $address;
+		$this->_port = $port;
+		$this->_users = array();
+		$this->_sockets = array();
 				
 		$this->createSocket();
 	}
@@ -47,12 +47,12 @@ class Server
 		if (!$this->master)
 			throw new Exception('Socket could not be created: ' . socket_last_error());
 		
-		$this->sockets[] = $this->master;
+		$this->_sockets[] = $this->master;
 		
 		if (!socket_set_option($this->master, SOL_SOCKET, SO_REUSEADDR, 1))
 			throw new Exception('Socket options could not be set: ' . socket_last_error());
 		
-		if (!socket_bind($this->master, $this->address, $this->port))
+		if (!socket_bind($this->master, $this->_address, $this->_port))
 			throw new Exception('Socket could not be binded to given address: ' . socket_last_error());
 		
 		if (!socket_listen($this->master, 20))
@@ -65,7 +65,7 @@ class Server
 	public function process()
 	{
 		while(true){
-			$changed = $this->sockets;
+			$changed = $this->_sockets;
 			socket_select($changed, $write, $except, null);
 			
 			foreach($changed as $socket){
@@ -99,8 +99,8 @@ class Server
 	{
 		if (!$socket)
 			return;
-		$this->users[] = new User($socket);
-		$this->sockets[] = $socket;
+		$this->_users[] = new User($socket);
+		$this->_sockets[] = $socket;
 	}
 	
 	/**
@@ -111,7 +111,7 @@ class Server
 	 */
 	public function getUserBySocket($socket)
 	{
-		foreach($this->users as $user) {
+		foreach($this->_users as $user) {
 			if ($user->getSocket() == $socket)
 				return $user;
 		}
@@ -124,14 +124,15 @@ class Server
 	 */
 	private function _removeUserSocket($socket)
 	{
-		foreach($this->users as $key => $value) {
+		foreach($this->_users as $key => $value) {
 			if ($value->getSocket() == $socket)
-				unset($this->users[$key]);
+				unset($this->_users[$key]);
+			$this->onClose($value, 0, '');
 		}
 		
-		foreach($this->sockets as $key => $value) {
+		foreach($this->_sockets as $key => $value) {
 			if ($value == $socket)
-				unset($this->sockets[$key]);
+				unset($this->_sockets[$key]);
 		}
 	}
 	
@@ -202,8 +203,8 @@ class Server
 			* 0x88: 10001000 fin, opcode close */
 			$user->write(chr(0x88) . chr(0));
 			
-			$this->onClose($user, $statusCode, $reason);
 			$this->_removeUserSocket($user->getSocket());
+			$this->onClose($user, $statusCode, $reason);
 		}
 	}
 	
@@ -274,8 +275,16 @@ class Server
 			$header .= chr($len);
 		}
 		
-		foreach($this->users as $user)
+		foreach($this->_users as $user)
 			$user->write($header . $text);
+	}
+	
+	/**
+	 * @return array
+	 */
+	public function getUsers()
+	{
+		return $this->_users;
 	}
 	
 	/**

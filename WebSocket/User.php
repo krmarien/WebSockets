@@ -9,18 +9,20 @@ use Exception;
  */
 class User
 {
-	private $socket;
+	private $_socket;
 	
-	private $handshaked = false;
+	private $_handshaked = false;
 	
-	private $buffer;
+	private $_buffer;
+	
+	private $_extraData;
 		
 	/**
 	 * @param mixed $socket
 	 */
 	public function __construct($socket)
 	{
-		$this->socket = $socket;
+		$this->_socket = $socket;
 	}
 	
 	/**
@@ -28,7 +30,7 @@ class User
 	 */
 	public function getSocket()
 	{
-		return $this->socket;
+		return $this->_socket;
 	}
 	
 	/**
@@ -36,7 +38,7 @@ class User
 	 */
 	public function hasHandshaked()
 	{
-		return $this->handshaked;
+		return $this->_handshaked;
 	}
 	
 	/**
@@ -69,7 +71,7 @@ class User
 			. "\r\n";
 
 		if ($this->write($response))
-			$this->handshaked = true;	
+			$this->_handshaked = true;	
 	}
 	
 	/**
@@ -79,7 +81,7 @@ class User
 	 */
 	public function write($data)
 	{
-		return socket_write($this->socket, $data, strlen($data));
+		return socket_write($this->_socket, $data, strlen($data));
 	}
 	
 	/**
@@ -89,7 +91,7 @@ class User
 	 */
 	public function createBuffer(Frame $frame)
 	{
-		$this->buffer = $frame;
+		$this->_buffer = $frame;
 	}
 	
 	/**
@@ -99,7 +101,7 @@ class User
 	 */
 	public function appendBuffer($frame)
 	{
-		$this->buffer->appendData($frame->getData());
+		$this->_buffer->appendData($frame->getData());
 	}
 	
 	/**
@@ -107,7 +109,7 @@ class User
 	 */
 	public function clearBuffer()
 	{
-		$this->buffer = null;
+		$this->_buffer = null;
 	}
 	
 	/**
@@ -117,6 +119,39 @@ class User
 	 */
 	public function getBuffer()
 	{
-		return $this->buffer;
+		return $this->_buffer;
+	}
+	
+	/**
+	 * @param string $key
+	 * @param mixed $value
+	 *
+	 * @return \WebSocket\User
+	 */
+	public function setExtraData($key, $value)
+	{
+		$this->_extraData[$key] = $value;
+		return $this;
+	}
+	
+	/**
+	 * @param string $key
+	 *
+	 * @return mixed
+	 */
+	public function getExtraData($key)
+	{
+		return isset($this->_extraData[$key]) ? $this->_extraData[$key] : null;
+	}
+	
+	/**
+	 * @param string $key
+	 *
+	 * @return \WebSocket\User
+	 */
+	public function removeExtraData($key)
+	{
+		unset($this->_extraData[$key]);
+		return $this;
 	}
 }
